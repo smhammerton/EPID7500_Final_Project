@@ -1,0 +1,135 @@
+---
+title: "Manuscript"
+author: "Savannah Hammerton"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+```{r}
+# Load packages 
+library(tidyverse)
+library(NatParksPalettes)
+library(here)
+library(gtsummary)
+library(naniar)
+
+# Set ggplot2 theme for whole script 
+ggplot2::theme_set(ggplot2::theme_linedraw())
+
+# Set paths
+here::here()
+```
+
+
+## Data 
+
+## Data import and basic info
+
+```{r}
+# Load data 
+colony <- readr::read_rds(here::here("data/colony.rds"))
+stressor <- readr::read_rds(here::here("data/stressor.rds"))
+
+# Check out the data 
+dplyr::glimpse(colony)
+dplyr::glimpse(stressor)
+```
+
+## Data processing 
+
+It looks like I could join the colony and stressor data sets into one, matching on `year`, `months`, and `state`. I'm going to do that now so I have one final data set to work with. I don't really want any data about stressors without any colony data, so I'm going to keep all the rows in the colony dataset, using `dplyr::left_join()`. 
+
+```{r}
+# Join data sets on year, months, and state, keeping all the rows in colony
+savethebees <- 
+  dplyr::left_join(colony, stressor,
+                   by = c("year", "months", "state"))
+# Check out the new data set 
+dplyr::glimpse(savethebees)
+```
+
+Since I now have the same number of rows in my final dataset that I did in the stressor dataset (which had exactly six times the number of rows in the colony data set), I can conclude that there are six stressors observed, and the data collectors included all of the six stressors for each year/location combination. I want to break those stressors into indicator/dummy variables so I can explore them a little more in depth. I will use `tidyr::pivot_wider()`, pulling names from the stressors themselves, and values from the percentage of colonies affected by the stressors during that time period in that location. When I do that, I will also rename the two stressors that have spaces in the names, and use `janitor::clean_names()` to make sure every variable is lower case. 
+
+```{r}
+# Pivot stressor data wider and rename variables with spaces 
+savethebees_wide <- 
+  savethebees |> 
+  dplyr::mutate(stressor = ifelse(stressor == "Disesases", "Diseases", stressor)) |> 
+  tidyr::pivot_wider(names_from = stressor, values_from = stress_pct) |> 
+  dplyr::rename(varroa_mites = `Varroa mites`,
+                other_pests_parasites = `Other pests/parasites`) |> 
+  janitor::clean_names()
+
+# Check out new data 
+dplyr::glimpse(savethebees_wide)
+```
+
+The data set is now back to the number of rows in the initial colony data set, which makes sense as the stressor variables were what were making the dataset longer. I'm now going to check for missingness using `naniar::gg_miss_var()`, which will show me the number of data points missing for each variable. 
+
+```{r}
+# Create function to rename variables in long (initial) dataset
+rename_long <- function(data) {
+  data |> 
+    dplyr::rename(Year = year,
+                  Quarter = months,
+                  State = state,
+                  `Number of colonies` = colony_n,
+                  `Maximum colonies` = colony_max,
+                  `Colonies lost` = colony_lost,
+                  `Percentage of total colonies lost` = colony_lost_pct,
+                  `Colonies added` = colony_added,
+                  `Colonies renovated` = colony_reno,
+                  `Percent of colonies renoavated` = colony_reno_pct,
+                  `Stress type` = stressor,
+                  `Percent of colonies affected by stressor in quarter` =
+                    stress_pct)
+}
+
+# Create function to rename variables in qide dataset 
+rename_wide <- function(data) {
+    data |> 
+    dplyr::rename(Year = year,
+                  Quarter = months,
+                  State = state,
+                  `Number of colonies` = colony_n,
+                  `Maximum colonies` = colony_max,
+                  `Colonies lost` = colony_lost,
+                  `Percentage of total colonies lost` = colony_lost_pct,
+                  `Colonies added` = colony_added,
+                  `Colonies renovated` = colony_reno,
+                  `Percent of colonies renoavated` = colony_reno_pct,
+                  `Varroa mites` = varroa_mites,
+                  `Other pests and parasites` = other_pests_parasites,
+                  `Diseases` = diseases,
+                  `Pesticides` = pesticides,
+                  `Other` = other,
+                  `Unknown` = unknown)
+
+}
+
+```
+
+```{r}
+# Check for missingness
+naniar::gg_miss_var(savethebees_wide)
+```
+
+The variable with the most missing data points is `colony_reno_pct`, which is the percentage of colonies renovated. I'm going to check what the range is of that variable, and see if it's possible that the NA's actually just mean it should be zero. While I'm at it, I'm going to do this for all the variables since all but the identifier variables have some missing values. 
+
+```{r}
+# savethebees_wide |>
+#   rename_wide() |> 
+#   dplyr::select(!c(Year, Quarter, State)) |> 
+#   dplyr::summarise(dplyr::across(.cols = everything(),
+#                                  .fns = min, na.rm = TRUE)) |> 
+#   t() |> 
+#   as.data.frame() |> 
+#   gt::gt()
+
+
+```
+
