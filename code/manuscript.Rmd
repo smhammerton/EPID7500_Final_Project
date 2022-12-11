@@ -27,6 +27,10 @@ here::here()
 
 ## Data 
 
+The data used for this project is the "Bee Colonies" TidyTuesday data. The GitHub repository with the data itself, instructions on how to load the data into R, and explanations of the data can be found at https://github.com/rfordatascience/tidytuesday/tree/master/data/2022/2022-01-11. In order to preserve the data files I used for this project, I have downloaded the data via GitHub in another script and saved them as .rds files in this project.
+
+The data originally comes from the USDA, and contains information on the number of bee colonies in various states during specific quarters (specified three month periods during a specified year). The data is split into two files: a `colony.csv` file (containing basic colony information) and a `stressor.csv` file (containing information on the specific stressors colonies experienced). In the `colony.csv` file, there is data on the total number of colonies, the maximum number of colonies, the number of colonies lost, the percent of total colonies lost, the number of colonies added, the number of colonies renovated, and the percent of colonies renovated. In the `stressor.csv` file, there is information of the types of stress experienced by colonies, and the percent of colonies affected by that stressor during that quarter (this allows for multiple stressors in the same quarter). Both files have three identifying variables: year, months (or, quarter), and state. Since both files have these three variables, they can be used to join the two data sets into one for easier exploration and analysis. 
+
 ## Data import and basic info
 
 ```{r}
@@ -39,9 +43,12 @@ dplyr::glimpse(colony)
 dplyr::glimpse(stressor)
 ```
 
+
+The `colony.rds` data set has 10 variables and 1,222 observations/records, while the `stressor.rds` data set has 5 variables and 7,332 observations/records. Both data sets have both character and numeric variables. All numeric variables are integers excepting the `stress_pct` variable in the `stressor.rds` data set. This matches the information in the data dictionary supplied on the GitHub page linked above. 
+
 ## Data processing 
 
-It looks like I could join the colony and stressor data sets into one, matching on `year`, `months`, and `state`. I'm going to do that now so I have one final data set to work with. I don't really want any data about stressors without any colony data, so I'm going to keep all the rows in the colony dataset, using `dplyr::left_join()`. 
+I'm going to join the colony and stressor data sets into one, matching on `year`, `months`, and `state`.  now so I have one final data set to work with. I don't really want any data about stressors without any colony data, so I'm going to keep all the rows in the colony dataset, using `dplyr::left_join()`. 
 
 ```{r}
 # Join data sets on year, months, and state, keeping all the rows in colony
