@@ -1,5 +1,5 @@
 ---
-title: "Manuscript"
+title: "Final Project"
 author: "Savannah Hammerton"
 date: "`r Sys.Date()`"
 output: pdf_document
@@ -12,13 +12,13 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 ```{r}
 # Load packages 
 library(tidyverse)
-library(NatParksPalettes)
 library(here)
-library(gtsummary)
 library(naniar)
+library(gt)
+library(broom)
 
 # Set ggplot2 theme for whole script 
-ggplot2::theme_set(ggplot2::theme_linedraw())
+ggplot2::theme_set(ggplot2::theme_test())
 
 # Set paths
 here::here()
@@ -48,13 +48,36 @@ The `colony.rds` data set has 10 variables and 1,222 observations/records, while
 
 ## Data processing 
 
-I'm going to join the colony and stressor data sets into one, matching on `year`, `months`, and `state`.  now so I have one final data set to work with. I don't really want any data about stressors without any colony data, so I'm going to keep all the rows in the colony dataset, using `dplyr::left_join()`. 
+I'm going to join the colony and stressor data sets into one, matching on `year`, `months`, and `state`.  now so I have one final data set to work with. I don't really want any data about stressors without any colony data, so I'm going to keep all the rows in the colony dataset, using `dplyr::left_join()`. While I am manipulating the data, I am also going to create a more specific time variable. This will allow me to group on time overall later. To do this, I will create a variable who's first portion is the pasted year from the year variable, followed either by a .0, .25. .5, or .75. Then if I want to plot totally over time, everything should be in the correct order. 
+
+Since there are so many states, it is also going to be difficult to visualize anything by geographical location unless I aggregate the states into regions. I will do this by using the `state.x77` data set and `state.region` vector already loaded into R (an explanation and example can be found here: https://gexijin.github.io/learnR/the-state-dataset.html#reading-in-and-manipulating-data). I will then join the regions to the final data set by matching the state names.
 
 ```{r}
+# Create state names and regions data set 
+regions <- 
+  cbind(data.frame(rownames(state.x77)), state.region) |> 
+  data.frame() |> 
+  dplyr::rename(state = rownames.state.x77.,
+                region = state.region)
+
 # Join data sets on year, months, and state, keeping all the rows in colony
+# Also join in state regions, matching on state 
+# Create new time variable
 savethebees <- 
   dplyr::left_join(colony, stressor,
-                   by = c("year", "months", "state"))
+                   by = c("year", "months", "state")) |> #colony and stressor
+  dplyr::left_join(regions,
+                   by = "state") |> #join state regions
+  dplyr::mutate(quarter = as.numeric( #create quarter variable based on months
+    dplyr::case_when(
+      grepl("January", months) ~ .0,
+      grepl("April", months) ~ .25,
+      grepl("July", months) ~ .5,
+      grepl("October", months) ~ .75
+    )
+  ),
+  time = year + quarter) |> #add year and quarter for one time variable
+  dplyr::select(!quarter) #don't need quarter variable anymore, remove
 # Check out the new data set 
 dplyr::glimpse(savethebees)
 ```
@@ -75,15 +98,17 @@ savethebees_wide <-
 dplyr::glimpse(savethebees_wide)
 ```
 
-The data set is now back to the number of rows in the initial colony data set, which makes sense as the stressor variables were what were making the dataset longer. I'm now going to check for missingness using `naniar::gg_miss_var()`, which will show me the number of data points missing for each variable. 
+I also want to create functions to rename variables for plots and tables. This will allow me to keep the variable names easy to type when I'm just exploring and running analyses, but make things easier to understand when presenting results.
 
 ```{r}
 # Create function to rename variables in long (initial) dataset
 rename_long <- function(data) {
-  data |> 
+  data |>
     dplyr::rename(Year = year,
                   Quarter = months,
                   State = state,
+                  Region = region,
+                  Time = time,
                   `Number of colonies` = colony_n,
                   `Maximum colonies` = colony_max,
                   `Colonies lost` = colony_lost,
@@ -96,12 +121,19 @@ rename_long <- function(data) {
                     stress_pct)
 }
 
-# Create function to rename variables in qide dataset 
+# Test the new function
+savethebees |> 
+  rename_long() |> 
+  dplyr::glimpse()
+
+# Create function to rename variables in qide dataset
 rename_wide <- function(data) {
-    data |> 
+    data |>
     dplyr::rename(Year = year,
                   Quarter = months,
                   State = state,
+                  Region = region,
+                  Time = time,
                   `Number of colonies` = colony_n,
                   `Maximum colonies` = colony_max,
                   `Colonies lost` = colony_lost,
@@ -118,25 +150,144 @@ rename_wide <- function(data) {
 
 }
 
+# Test the new function
+savethebees_wide |> 
+  rename_wide() |> 
+  dplyr::glimpse()
+
 ```
+
+The data set is now back to the number of rows in the initial colony data set, which makes sense as the stressor variables were what were making the dataset longer. I'm now going to check for missingness using `naniar::gg_miss_var()`, which will show me the number of data points missing for each variable. 
 
 ```{r}
 # Check for missingness
 naniar::gg_miss_var(savethebees_wide)
 ```
 
-The variable with the most missing data points is `colony_reno_pct`, which is the percentage of colonies renovated. I'm going to check what the range is of that variable, and see if it's possible that the NA's actually just mean it should be zero. While I'm at it, I'm going to do this for all the variables since all but the identifier variables have some missing values. 
+The variable with the most missing data points is `colony_reno_pct`, which is the percentage of colonies renovated. I'm going to check what the range is of that variable, and see if it's possible that the NA's actually just mean it should be zero. While I'm at it, I'm going to do this for all the variables since all but the identifier variables have some missing values. While region is an identifying variable and does have missing data, I expected this as the data dictionary states that there are "United States" and "Other States" options, which will not have matched with any regions, so I will leave those be. 
 
 ```{r}
-# savethebees_wide |>
-#   rename_wide() |> 
-#   dplyr::select(!c(Year, Quarter, State)) |> 
-#   dplyr::summarise(dplyr::across(.cols = everything(),
-#                                  .fns = min, na.rm = TRUE)) |> 
-#   t() |> 
-#   as.data.frame() |> 
-#   gt::gt()
+# See the minimum values for each variable
+savethebees_wide |>
+  rename_wide() |> 
+  dplyr::select(!c(Year, Quarter, State, Time, Region)) |>
+  dplyr::summarise(dplyr::across(.cols = everything(),
+                                 .fns = min, na.rm = TRUE)) |> 
+  t() |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column(var = "Variable") |> 
+  dplyr::rename("Minimium" = V1) |> 
+  gt::gt()
+```
+
+Since not a single variable contains the value zero, I am going to function under the assumption that NAs just mean something like "zero observed." This is a risky/bold assumption, but I think it will allow me to visualize things more easily. 
+
+For each data set, I will select everything but the character variables, and then mutate across all those remaining variables, replacing NAs with zeros. 
+
+```{r}
+# Replace NAs with zeros
+savethebees <-
+  savethebees |> 
+  dplyr::mutate(dplyr::across(!c(state, months, year, stressor, time, region),
+                             ~ tidyr::replace_na(.x, 0)))
+
+# Replace NAs with zeros 
+savethebees_wide <- 
+  savethebees_wide |> 
+  dplyr::mutate(dplyr::across(!c(year, months, state, time, region),
+                              ~ tidyr::replace_na(.x, 0)))
+
+# Recheck minimums
+savethebees_wide |>
+  rename_wide() |> 
+  dplyr::summarise(dplyr::across(!c(Year, Quarter, State, Time, Region),
+                                 .fns = min, na.rm = TRUE)) |> 
+  t() |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column(var = "Variable") |> 
+  dplyr::rename("Minimium" = V1) |> 
+  gt::gt()
+```
+
+Now I'm going to check the final data sets one last time to make sure everything looks like it should. 
+
+```{r}
+# Check the long data set 
+dplyr::glimpse(savethebees)
+
+# Check the wide data set 
+dplyr::glimpse(savethebees_wide)
+```
+
+Everything looks good now, so I can move on to the visualizations and analyses. 
+
+## Visualizations
+
+I mostly want to see how the colonies have been faring, and what has seemed to harm them. To visualize this, I'll make two plot grids, both of which will be grouped by region (50 states will just be too much to visualize at once) - in both grids, the columns will be the regions. 
+
+The first plot grid will be histograms of the percentage of total colonies lost. The rows of this grid will be the year, the x-axis will be the percentage of total colonies lost, and the y-axis will be the density.
+
+The second plot will show the percentages of colonies impacted by stressors over time. Here, the grid rows will be the different stressor types, the x-axis will be time (the time variable we created that includes quarters), and the y-axis will be the average percent of colonies impacted by that stressor (we need to take the mean so we don't end up plotting points for each individual state).
+
+```{r fig.height=6, fig.width=6}
+savethebees |> 
+  rename_long() |> 
+  dplyr::filter(Region != "NA") |> 
+  ggplot2::ggplot(aes(x = `Percentage of total colonies lost`)) +
+  ggplot2::geom_histogram(aes(y = ..density..), 
+                          color = "black") +
+  ggplot2::facet_grid(Year ~ Region, scales = "fixed") +
+  ggplot2::labs(title = 
+        "Distributions of colony loss percentages",
+        subtitle = "Grouped by region and year",
+        y = "Density")
 
 
+
+savethebees |> 
+  rename_long() |> 
+  group_by(Region, Time, `Stress type`) |> 
+  dplyr::filter(Region != "NA") |> 
+  mutate(`Average percent of colonies impacted by stressor` = 
+           mean(`Percent of colonies affected by stressor in quarter`)) |> 
+  ggplot2::ggplot(aes(x = Time, 
+                      y = `Average percent of colonies impacted by stressor`)) +
+  ggplot2::geom_point() +
+  facet_grid(`Stress type` ~ Region) +
+  ggplot2::labs(title = 
+                  "Percentages of colonies impacted by stressors over time",
+                subtitle = "Grouped by region and stressor type")
+```
+
+## Analysis 
+
+Based on what I saw in my plots, I'm interested to see if the percentage of colonies lost can be explained by some of the other variables I explored. Specifically, I'll look at year, region, months/quarter, and the stressors diseases, varroa mites, pesticides, and other pests/parasites. Based on the plots above and just not really knowing what they are, I'm going to leave out the "other" and "unknown" stressors. I'll put all of these into a linear regression model, and use the number of colonies as weights. Performing this analysis will allow me to see if any of the variables stand out as having an impact on the loss of bee colonies.
+
+```{r}
+# Run multiple linear regression 
+mymodel <- 
+  lm(formula = colony_lost_pct ~ year + region + months +
+     diseases + varroa_mites + pesticides + other_pests_parasites,
+     weights = colony_n,
+   data = savethebees_wide)
+
+# View model summary
+summary(mymodel)
+
+# View model output/estimates 
+mymodel |> 
+  broom::tidy() |>
+  knitr::kable()
+```
+
+Based on the results of the linear regression, the variables/predictors that have statistically significant relationships ($\alpha < 0.05$) with the percent of colonies lost, while controlling for all the other predictors, are year, all of the quarters, varroa mites, and pesticides. All three of the quarters listed appear to be associated with increased colony loss. This makes sense as the reference quarter is April-June, and springtime is prime bee season. The year estimate being negative indicates decreased colony loss as years increase. Finally, varroa mites and pesticides are both positively associated with colony loss, indicating that as verroa mites and pesticides increase, colony loss also increases. 
+
+It is also important to note that linear regression was not the most appropriate model to use for this kind of data. However, for the sake of staying within what we covered in class, it seemed the best option for this project. Also, as this is all aggregated data, we cannot draw any conclusions about individual colonies. 
+
+
+## Session Info
+
+```{r}
+sessioninfo::session_info()
 ```
 
